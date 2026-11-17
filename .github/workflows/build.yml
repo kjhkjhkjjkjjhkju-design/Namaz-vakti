@@ -1,0 +1,558 @@
+name: Namaz Vakti APK
+
+on:
+  workflow_dispatch:
+  push:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      # İmza anahtarı cache'te saklanır: her derlemede aynı imza -> APK'yı silmeden güncelleyebilirsin
+      - name: Anahtar önbelleği
+        uses: actions/cache@v4
+        with:
+          path: k.jks
+          key: namaz-keystore-v1
+
+      - name: Proje dosyalarını oluştur
+        run: |
+          mkdir -p res/drawable res/layout src/com/veysel/namaz gen out cls
+
+          cat > AndroidManifest.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <manifest xmlns:android="http://schemas.android.com/apk/res/android" package="com.veysel.namaz">
+            <uses-permission android:name="android.permission.INTERNET"/>
+            <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
+            <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
+            <uses-permission android:name="android.permission.USE_EXACT_ALARM"/>
+            <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" android:maxSdkVersion="32"/>
+            <application android:label="Namaz Vakti" android:icon="@drawable/ic_launcher"
+                android:theme="@android:style/Theme.DeviceDefault.NoActionBar" android:allowBackup="false">
+              <activity android:name=".MainActivity" android:exported="true">
+                <intent-filter>
+                  <action android:name="android.intent.action.MAIN"/>
+                  <category android:name="android.intent.category.LAUNCHER"/>
+                </intent-filter>
+              </activity>
+              <receiver android:name=".Rcv" android:exported="true">
+                <intent-filter>
+                  <action android:name="android.intent.action.BOOT_COMPLETED"/>
+                  <action android:name="android.intent.action.MY_PACKAGE_REPLACED"/>
+                  <action android:name="android.intent.action.TIME_SET"/>
+                  <action android:name="android.intent.action.TIMEZONE_CHANGED"/>
+                </intent-filter>
+              </receiver>
+            </application>
+          </manifest>
+          EOF
+
+          cat > res/drawable/ic_stat.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="24dp" android:height="24dp" android:viewportWidth="24" android:viewportHeight="24">
+            <path android:fillColor="#FFFFFF" android:pathData="M12,3c-4.97,0 -9,4.03 -9,9s4.03,9 9,9s9,-4.03 9,-9c0,-0.46 -0.04,-0.92 -0.1,-1.36c-0.98,1.37 -2.58,2.26 -4.4,2.26c-2.98,0 -5.4,-2.42 -5.4,-5.4c0,-1.81 0.89,-3.42 2.26,-4.4C12.92,3.04 12.46,3 12,3L12,3z"/>
+          </vector>
+          EOF
+
+          cat > res/drawable/ic_launcher.xml <<'EOF'
+          <vector xmlns:android="http://schemas.android.com/apk/res/android" android:width="48dp" android:height="48dp" android:viewportWidth="24" android:viewportHeight="24">
+            <path android:fillColor="#000000" android:pathData="M12,0a12,12 0 1,0 0.001,0z"/>
+            <group android:scaleX="0.6" android:scaleY="0.6" android:pivotX="12" android:pivotY="12">
+              <path android:fillColor="#FF9800" android:pathData="M12,3c-4.97,0 -9,4.03 -9,9s4.03,9 9,9s9,-4.03 9,-9c0,-0.46 -0.04,-0.92 -0.1,-1.36c-0.98,1.37 -2.58,2.26 -4.4,2.26c-2.98,0 -5.4,-2.42 -5.4,-5.4c0,-1.81 0.89,-3.42 2.26,-4.4C12.92,3.04 12.46,3 12,3L12,3z"/>
+            </group>
+          </vector>
+          EOF
+
+          # Küçük (kapalı) bildirim görünümü
+          cat > res/layout/ns.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:orientation="horizontal" android:gravity="center_vertical"
+              android:background="#000000"
+              android:paddingLeft="12dp" android:paddingRight="12dp" android:paddingTop="6dp" android:paddingBottom="6dp">
+            <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                android:layout_weight="1" android:orientation="vertical">
+              <TextView android:id="@+id/a" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:textColor="#FF9800" android:textSize="16sp" android:textStyle="bold" android:singleLine="true"/>
+              <TextView android:id="@+id/b" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:textColor="#8A8A8A" android:textSize="12sp" android:singleLine="true"/>
+            </LinearLayout>
+            <Chronometer android:id="@+id/c1" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                android:textColor="#FFFFFF" android:textSize="24sp" android:textStyle="bold"/>
+          </LinearLayout>
+          EOF
+
+          # Büyük (açık) bildirim görünümü: üstte süre, ortada 6 vakit, altta süre
+          cat > res/layout/nb.xml <<'EOF'
+          <?xml version="1.0" encoding="utf-8"?>
+          <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+              android:layout_width="match_parent" android:layout_height="wrap_content"
+              android:orientation="vertical" android:background="#000000" android:padding="12dp">
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical">
+              <TextView android:id="@+id/ta" android:layout_width="0dp" android:layout_height="wrap_content"
+                  android:layout_weight="1" android:textColor="#FF9800" android:textSize="12sp" android:textStyle="bold" android:singleLine="true"/>
+              <Chronometer android:id="@+id/c1" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:textColor="#FFFFFF" android:textSize="22sp" android:textStyle="bold"/>
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginTop="8dp" android:layout_marginBottom="8dp">
+          EOF
+          for i in 0 1 2 3 4 5; do
+          cat >> res/layout/nb.xml <<EOF
+              <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
+                  android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal">
+                <TextView android:id="@+id/n$i" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:textColor="#FFFFFF" android:textSize="12sp" android:singleLine="true"/>
+                <TextView android:id="@+id/v$i" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                    android:textColor="#FFFFFF" android:textSize="15sp" android:textStyle="bold" android:singleLine="true"/>
+              </LinearLayout>
+          EOF
+          done
+          cat >> res/layout/nb.xml <<'EOF'
+            </LinearLayout>
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:gravity="center_vertical">
+              <TextView android:id="@+id/tb" android:layout_width="0dp" android:layout_height="wrap_content"
+                  android:layout_weight="1" android:textColor="#8A8A8A" android:textSize="12sp" android:singleLine="true"/>
+              <Chronometer android:id="@+id/c2" android:layout_width="wrap_content" android:layout_height="wrap_content"
+                  android:textColor="#FFFFFF" android:textSize="22sp" android:textStyle="bold"/>
+            </LinearLayout>
+          </LinearLayout>
+          EOF
+
+          cat > src/com/veysel/namaz/Rcv.java <<'EOF'
+          package com.veysel.namaz;
+
+          import android.content.BroadcastReceiver;
+          import android.content.Context;
+          import android.content.Intent;
+
+          public class Rcv extends BroadcastReceiver {
+            @Override public void onReceive(Context c, Intent i) {
+              Core.update(c);
+            }
+          }
+          EOF
+
+          cat > src/com/veysel/namaz/Core.java <<'EOF'
+          package com.veysel.namaz;
+
+          import android.app.AlarmManager;
+          import android.app.Notification;
+          import android.app.NotificationChannel;
+          import android.app.NotificationManager;
+          import android.app.PendingIntent;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.os.Build;
+          import android.os.SystemClock;
+          import android.util.TypedValue;
+          import android.widget.RemoteViews;
+          import java.io.BufferedReader;
+          import java.io.File;
+          import java.io.FileReader;
+          import java.util.ArrayList;
+          import java.util.Calendar;
+          import java.util.List;
+          import java.util.Locale;
+          import java.util.TimeZone;
+
+          public class Core {
+            static final String CH = "vakit", TICK = "com.veysel.namaz.TICK";
+            static final String[] N = {"İmsak", "Güneş", "Öğle", "İkindi", "Akşam", "Yatsı"};
+            static final String[] U = {"İMSAK", "GÜNEŞ", "ÖĞLE", "İKİNDİ", "AKŞAM", "YATSI"};
+            static final String[] L = {"İMSAK EZANINA KALAN", "GÜNEŞ DOĞUŞUNA KALAN", "ÖĞLE EZANINA KALAN",
+                "İKİNDİ EZANINA KALAN", "AKŞAM EZANINA KALAN", "YATSI EZANINA KALAN"};
+            static final int OR = 0xFFFF9800, WH = 0xFFFFFFFF, DIM = 0xFF8A8A8A;
+            static final TimeZone TZ = TimeZone.getTimeZone("Europe/Istanbul");
+
+            static File f(Context c) { return new File(c.getFilesDir(), "d.txt"); }
+
+            // Her satır: yyyyMMdd,imsak,güneş,öğle,ikindi,akşam,yatsı
+            static List<String[]> load(Context c) {
+              List<String[]> r = new ArrayList<>();
+              try (BufferedReader br = new BufferedReader(new FileReader(f(c)))) {
+                String s;
+                while ((s = br.readLine()) != null) {
+                  String[] p = s.split(",");
+                  if (p.length == 7) r.add(p);
+                }
+              } catch (Exception e) { }
+              return r;
+            }
+
+            static String key() {
+              Calendar c = Calendar.getInstance(TZ);
+              return String.format(Locale.US, "%04d%02d%02d", c.get(Calendar.YEAR), c.get(Calendar.MONTH) + 1, c.get(Calendar.DAY_OF_MONTH));
+            }
+
+            static long ms(String d, String t) {
+              Calendar c = Calendar.getInstance(TZ);
+              c.clear();
+              c.set(Integer.parseInt(d.substring(0, 4)), Integer.parseInt(d.substring(4, 6)) - 1, Integer.parseInt(d.substring(6, 8)),
+                  Integer.parseInt(t.substring(0, 2)), Integer.parseInt(t.substring(3, 5)), 0);
+              return c.getTimeInMillis();
+            }
+
+            static int[] next(List<String[]> rows, long now) {
+              for (int i = 0; i < rows.size(); i++)
+                for (int j = 0; j < 6; j++)
+                  if (ms(rows.get(i)[0], rows.get(i)[j + 1]) > now) return new int[]{i, j};
+              return null;
+            }
+
+            static PendingIntent tick(Context c, int code) {
+              return PendingIntent.getBroadcast(c, code, new Intent(c, Rcv.class).setAction(TICK),
+                  PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+            }
+
+            static void update(Context c) {
+              NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
+              AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
+              PendingIntent alarm = tick(c, 1);
+              List<String[]> rows = load(c);
+              long now = System.currentTimeMillis();
+              int[] n = rows.isEmpty() ? null : next(rows, now);
+              // Veri yok / veri bitti / izin yok -> bildirim yok, alarm yok
+              if (n == null || !nm.areNotificationsEnabled()) {
+                nm.cancel(1);
+                am.cancel(alarm);
+                return;
+              }
+              String[] row = rows.get(n[0]);
+              int j = n[1];
+              String tm = row[j + 1];
+              long t = ms(row[0], tm);
+              long base = SystemClock.elapsedRealtime() + (t - now);
+
+              NotificationChannel ch = new NotificationChannel(CH, "Namaz vakitleri", NotificationManager.IMPORTANCE_LOW);
+              ch.setShowBadge(false);
+              ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
+              nm.createNotificationChannel(ch);
+
+              RemoteViews s = new RemoteViews(c.getPackageName(), R.layout.ns);
+              s.setTextViewText(R.id.a, U[j] + "  " + tm);
+              s.setTextViewText(R.id.b, j == 1 ? "doğuşuna kalan" : "ezanına kalan");
+              s.setChronometerCountDown(R.id.c1, true);
+              s.setChronometer(R.id.c1, base, null, true);
+
+              int[] NI = {R.id.n0, R.id.n1, R.id.n2, R.id.n3, R.id.n4, R.id.n5};
+              int[] VI = {R.id.v0, R.id.v1, R.id.v2, R.id.v3, R.id.v4, R.id.v5};
+              RemoteViews big = new RemoteViews(c.getPackageName(), R.layout.nb);
+              big.setTextViewText(R.id.ta, L[j]);
+              big.setTextViewText(R.id.tb, N[j] + "  " + tm);
+              big.setChronometerCountDown(R.id.c1, true);
+              big.setChronometer(R.id.c1, base, null, true);
+              big.setChronometerCountDown(R.id.c2, true);
+              big.setChronometer(R.id.c2, base, null, true);
+              for (int i = 0; i < 6; i++) {
+                boolean past = ms(row[0], row[i + 1]) <= now;
+                int col = i == j ? OR : (past ? DIM : WH);
+                big.setTextViewText(NI[i], N[i]);
+                big.setTextViewText(VI[i], row[i + 1]);
+                big.setTextColor(NI[i], col);
+                big.setTextColor(VI[i], col);
+                if (i == j) big.setTextViewTextSize(VI[i], TypedValue.COMPLEX_UNIT_SP, 18);
+              }
+
+              PendingIntent open = PendingIntent.getActivity(c, 3, new Intent(c, MainActivity.class),
+                  PendingIntent.FLAG_IMMUTABLE | PendingIntent.FLAG_UPDATE_CURRENT);
+              Notification nt = new Notification.Builder(c, CH)
+                  .setSmallIcon(R.drawable.ic_stat)
+                  .setContentTitle(N[j] + " " + tm)
+                  .setColor(OR)
+                  .setStyle(new Notification.DecoratedCustomViewStyle())
+                  .setCustomContentView(s)
+                  .setCustomBigContentView(big)
+                  .setOngoing(true)
+                  .setOnlyAlertOnce(true)
+                  .setShowWhen(false)
+                  .setVisibility(Notification.VISIBILITY_PUBLIC)
+                  .setContentIntent(open)
+                  .setDeleteIntent(tick(c, 2)) // kullanıcı kaydırıp silerse tekrar gönderir
+                  .build();
+              nm.notify(1, nt);
+
+              long at = t + 1000;
+              if (Build.VERSION.SDK_INT >= 31 && !am.canScheduleExactAlarms())
+                am.setAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm);
+              else
+                am.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, at, alarm);
+            }
+          }
+          EOF
+
+          cat > src/com/veysel/namaz/MainActivity.java <<'EOF'
+          package com.veysel.namaz;
+
+          import android.app.Activity;
+          import android.content.SharedPreferences;
+          import android.content.pm.PackageManager;
+          import android.graphics.Typeface;
+          import android.os.Build;
+          import android.os.Bundle;
+          import android.view.Gravity;
+          import android.view.View;
+          import android.widget.ArrayAdapter;
+          import android.widget.Button;
+          import android.widget.LinearLayout;
+          import android.widget.Spinner;
+          import android.widget.TextView;
+          import java.io.BufferedReader;
+          import java.io.File;
+          import java.io.IOException;
+          import java.io.InputStreamReader;
+          import java.io.PrintWriter;
+          import java.net.HttpURLConnection;
+          import java.net.URL;
+          import java.util.ArrayList;
+          import java.util.Calendar;
+          import java.util.List;
+          import org.json.JSONArray;
+          import org.json.JSONObject;
+
+          public class MainActivity extends Activity {
+            static final String[] C = {
+              "Adana,37.00,35.32", "Adıyaman,37.76,38.28", "Afyonkarahisar,38.76,30.54", "Ağrı,39.72,43.05",
+              "Aksaray,38.37,34.03", "Amasya,40.65,35.83", "Ankara,39.93,32.86", "Antalya,36.90,30.70",
+              "Ardahan,41.11,42.70", "Artvin,41.18,41.82", "Aydın,37.85,27.84", "Balıkesir,39.65,27.89",
+              "Bartın,41.64,32.34", "Batman,37.88,41.13", "Bayburt,40.26,40.23", "Bilecik,40.14,29.98",
+              "Bingöl,38.88,40.50", "Bitlis,38.40,42.11", "Bolu,40.73,31.61", "Burdur,37.72,30.29",
+              "Bursa,40.19,29.06", "Çanakkale,40.15,26.41", "Çankırı,40.60,33.62", "Çorum,40.55,34.95",
+              "Denizli,37.78,29.09", "Diyarbakır,37.91,40.24", "Düzce,40.84,31.16", "Edirne,41.68,26.56",
+              "Elazığ,38.67,39.22", "Erzincan,39.75,39.49", "Erzurum,39.90,41.27", "Eskişehir,39.78,30.52",
+              "Gaziantep,37.07,37.38", "Giresun,40.91,38.39", "Gümüşhane,40.46,39.48", "Hakkari,37.58,43.74",
+              "Hatay,36.20,36.16", "Iğdır,39.92,44.04", "Isparta,37.76,30.55", "İstanbul,41.01,28.98",
+              "İzmir,38.42,27.14", "Kahramanmaraş,37.58,36.94", "Karabük,41.20,32.63", "Karaman,37.18,33.22",
+              "Kars,40.60,43.10", "Kastamonu,41.38,33.78", "Kayseri,38.73,35.49", "Kilis,36.72,37.12",
+              "Kırıkkale,39.85,33.52", "Kırklareli,41.74,27.23", "Kırşehir,39.15,34.17", "Kocaeli,40.77,29.94",
+              "Konya,37.87,32.48", "Kütahya,39.42,29.98", "Malatya,38.35,38.31", "Manisa,38.61,27.43",
+              "Mardin,37.31,40.74", "Mersin,36.80,34.64", "Muğla,37.22,28.36", "Muş,38.74,41.49",
+              "Nevşehir,38.62,34.71", "Niğde,37.97,34.68", "Ordu,40.98,37.88", "Osmaniye,37.07,36.25",
+              "Rize,41.02,40.52", "Sakarya,40.76,30.40", "Samsun,41.29,36.33", "Siirt,37.93,41.94",
+              "Sinop,42.03,35.15", "Sivas,39.75,37.02", "Şanlıurfa,37.16,38.79", "Şırnak,37.52,42.46",
+              "Tekirdağ,41.00,27.51", "Tokat,40.31,36.55", "Trabzon,41.00,39.72", "Tunceli,39.11,39.55",
+              "Uşak,38.68,29.41", "Van,38.50,43.37", "Yalova,40.65,29.27", "Yozgat,39.82,34.81", "Zonguldak,41.46,31.80"
+            };
+
+            TextView st, td;
+            Spinner sp;
+            Button bt;
+            SharedPreferences pr;
+
+            int dp(int v) { return (int) (v * getResources().getDisplayMetrics().density); }
+
+            TextView tv(String s, int sz, int col, boolean bold) {
+              TextView t = new TextView(this);
+              t.setText(s);
+              t.setTextSize(sz);
+              t.setTextColor(col);
+              if (bold) t.setTypeface(null, Typeface.BOLD);
+              return t;
+            }
+
+            @Override protected void onCreate(Bundle b) {
+              super.onCreate(b);
+              pr = getSharedPreferences("p", 0);
+              int p = dp(20);
+              LinearLayout r = new LinearLayout(this);
+              r.setOrientation(LinearLayout.VERTICAL);
+              r.setBackgroundColor(0xFF000000);
+              r.setPadding(p, p, p, p);
+
+              r.addView(tv("Namaz Vakti", 28, 0xFFFF9800, true));
+              TextView sub = tv("Türkiye · Diyanet yöntemi", 14, 0xFF8A8A8A, false);
+              sub.setPadding(0, 0, 0, dp(16));
+              r.addView(sub);
+
+              String[] nm = new String[C.length];
+              for (int i = 0; i < C.length; i++) nm[i] = C[i].split(",")[0];
+              sp = new Spinner(this);
+              ArrayAdapter<String> ad = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, nm);
+              ad.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+              sp.setAdapter(ad);
+              sp.setSelection(Math.min(pr.getInt("ci", 0), C.length - 1));
+              r.addView(sp);
+
+              bt = new Button(this);
+              bt.setText("Veriyi Çek (1 yıllık)");
+              bt.setOnClickListener(v -> fetchAll());
+              r.addView(bt);
+
+              st = tv("", 14, 0xFF8A8A8A, false);
+              st.setPadding(0, dp(12), 0, 0);
+              r.addView(st);
+              td = tv("", 20, 0xFFFFFFFF, true);
+              td.setPadding(0, dp(16), 0, 0);
+              r.addView(td);
+
+              View sp2 = new View(this);
+              r.addView(sp2, new LinearLayout.LayoutParams(1, 0, 1f));
+              TextView ft = tv("Yapımcı: Veysel Alemdar", 13, 0xFF8A8A8A, false);
+              ft.setGravity(Gravity.CENTER);
+              r.addView(ft, new LinearLayout.LayoutParams(-1, -2));
+              setContentView(r);
+
+              if (Build.VERSION.SDK_INT >= 33
+                  && checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED)
+                requestPermissions(new String[]{"android.permission.POST_NOTIFICATIONS"}, 1);
+            }
+
+            @Override protected void onResume() {
+              super.onResume();
+              refresh();
+              Core.update(this);
+            }
+
+            @Override public void onRequestPermissionsResult(int code, String[] p, int[] g) {
+              Core.update(this);
+              refresh();
+            }
+
+            static String fmt(String s) { return s.substring(6, 8) + "." + s.substring(4, 6) + "." + s.substring(0, 4); }
+
+            void refresh() {
+              List<String[]> rows = Core.load(this);
+              if (rows.isEmpty()) {
+                st.setText("Henüz veri yok. Şehir seç ve veriyi çek.");
+                td.setText("");
+                return;
+              }
+              String msg = pr.getString("city", "") + "\nVeri: " + fmt(rows.get(0)[0]) + " – "
+                  + fmt(rows.get(rows.size() - 1)[0]) + " (" + rows.size() + " gün)";
+              if (Core.next(rows, System.currentTimeMillis()) == null)
+                msg += "\nVeri bitti, bildirim kapalı. Tekrar veri çek.";
+              st.setText(msg);
+              String today = Core.key();
+              StringBuilder sb = new StringBuilder();
+              for (String[] w : rows)
+                if (w[0].equals(today))
+                  for (int j = 0; j < 6; j++) sb.append(Core.N[j]).append("   ").append(w[j + 1]).append("\n");
+              td.setText(sb.toString().trim());
+            }
+
+            void post(String s) { runOnUiThread(() -> st.setText(s)); }
+
+            void fetchAll() {
+              final int idx = sp.getSelectedItemPosition();
+              bt.setEnabled(false);
+              new Thread(() -> {
+                String err = null;
+                try { fetch(idx); } catch (Exception e) { err = "Hata: " + e.getMessage(); }
+                final String er = err;
+                runOnUiThread(() -> {
+                  bt.setEnabled(true);
+                  if (er != null) { st.setText(er); return; }
+                  pr.edit().putInt("ci", idx).putString("city", C[idx].split(",")[0]).apply();
+                  Core.update(this);
+                  refresh();
+                });
+              }).start();
+            }
+
+            void fetch(int idx) throws Exception {
+              String[] cc = C[idx].split(",");
+              Calendar cal = Calendar.getInstance(Core.TZ);
+              int y = cal.get(Calendar.YEAR), m = cal.get(Calendar.MONTH) + 1;
+              String today = Core.key();
+              List<String> out = new ArrayList<>();
+              for (int k = 0; k < 13 && out.size() < 365; k++) {
+                post("İndiriliyor " + (k + 1) + "/13 ...");
+                String u = "https://api.aladhan.com/v1/calendar/" + y + "/" + m + "?latitude=" + cc[1]
+                    + "&longitude=" + cc[2] + "&method=13&timezonestring=Europe/Istanbul";
+                JSONArray a = new JSONObject(get(u)).getJSONArray("data");
+                for (int i = 0; i < a.length() && out.size() < 365; i++) {
+                  JSONObject o = a.getJSONObject(i);
+                  String[] d = o.getJSONObject("date").getJSONObject("gregorian").getString("date").split("-");
+                  String key = d[2] + d[1] + d[0];
+                  if (key.compareTo(today) < 0) continue;
+                  JSONObject t = o.getJSONObject("timings");
+                  out.add(key + "," + h(t, "Fajr") + "," + h(t, "Sunrise") + "," + h(t, "Dhuhr") + ","
+                      + h(t, "Asr") + "," + h(t, "Maghrib") + "," + h(t, "Isha"));
+                }
+                if (++m > 12) { m = 1; y++; }
+                Thread.sleep(300);
+              }
+              if (out.size() < 300) throw new Exception("Veri eksik geldi, tekrar dene");
+              File tmp = new File(getFilesDir(), "d.tmp");
+              try (PrintWriter w = new PrintWriter(tmp, "UTF-8")) {
+                for (String s : out) w.println(s);
+              }
+              if (!tmp.renameTo(Core.f(this))) throw new IOException("Kaydedilemedi");
+            }
+
+            static String h(JSONObject t, String k) throws Exception { return t.getString(k).substring(0, 5); }
+
+            String get(String u) throws Exception {
+              Exception last = null;
+              for (int a = 0; a < 3; a++) {
+                try {
+                  HttpURLConnection c = (HttpURLConnection) new URL(u).openConnection();
+                  c.setConnectTimeout(15000);
+                  c.setReadTimeout(20000);
+                  if (c.getResponseCode() != 200) throw new IOException("HTTP " + c.getResponseCode());
+                  BufferedReader br = new BufferedReader(new InputStreamReader(c.getInputStream(), "UTF-8"));
+                  StringBuilder sb = new StringBuilder();
+                  String s;
+                  while ((s = br.readLine()) != null) sb.append(s);
+                  br.close();
+                  c.disconnect();
+                  return sb.toString();
+                } catch (Exception e) {
+                  last = e;
+                  Thread.sleep(1500);
+                }
+              }
+              throw last;
+            }
+          }
+          EOF
+
+      - name: Derle ve imzala
+        run: |
+          SDK="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          BT=$(ls -d "$SDK"/build-tools/[0-9]* | sort -V | tail -1)
+          JAR=$(ls -d "$SDK"/platforms/android-[0-9][0-9] | sort -V | tail -1)/android.jar
+          echo "build-tools: $BT"; echo "platform: $JAR"
+
+          "$BT/aapt2" compile --dir res -o res.zip
+          "$BT/aapt2" link -o base.apk -I "$JAR" --manifest AndroidManifest.xml --java gen \
+            --min-sdk-version 24 --target-sdk-version 34 --version-code 1 --version-name 1.0 res.zip
+
+          javac -encoding UTF-8 --release 8 -classpath "$JAR" -d cls $(find gen src -name '*.java')
+          "$BT/d8" --release --min-api 24 --lib "$JAR" --output out $(find cls -name '*.class')
+
+          cp base.apk app.apk
+          (cd out && zip -j ../app.apk classes.dex)
+          "$BT/zipalign" -f -p 4 app.apk aligned.apk
+
+          [ -f k.jks ] || keytool -genkeypair -keystore k.jks -alias k -keyalg RSA -keysize 2048 \
+            -validity 10000 -storepass namaz123 -keypass namaz123 -dname "CN=Veysel Alemdar"
+          "$BT/apksigner" sign --ks k.jks --ks-pass pass:namaz123 --key-pass pass:namaz123 \
+            --out namaz-vakti.apk aligned.apk
+          ls -l namaz-vakti.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: namaz-vakti
+          path: namaz-vakti.apk
+
+      # Telefondan kolay indirmek için Release olarak da yayınlar
+      - name: Release oluştur
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "v${{ github.run_number }}" namaz-vakti.apk \
+            --repo "$GITHUB_REPOSITORY" --target "${{ github.sha }}" \
+            --title "Namaz Vakti v${{ github.run_number }}" --notes "Yapımcı: Veysel Alemdar"
