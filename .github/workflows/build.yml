@@ -83,16 +83,16 @@ jobs:
             <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
                 android:layout_weight="1" android:orientation="vertical">
               <TextView android:id="@+id/a" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                  android:textColor="#FF9800" android:textSize="16sp" android:textStyle="bold" android:singleLine="true"/>
+                  android:textColor="#FF9800" android:textSize="16dp" android:textStyle="bold" android:singleLine="true"/>
               <TextView android:id="@+id/b" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                  android:textColor="#8A8A8A" android:textSize="12sp" android:singleLine="true"/>
+                  android:textColor="#8A8A8A" android:textSize="12dp" android:singleLine="true"/>
             </LinearLayout>
             <Chronometer android:id="@+id/c1" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                android:textColor="#FFFFFF" android:textSize="24sp" android:textStyle="bold"/>
+                android:textColor="#FFFFFF" android:textSize="24dp" android:textStyle="bold"/>
           </LinearLayout>
           EOF
 
-          # Büyük (açık) bildirim görünümü: üstte süre, ortada 6 vakit, altta süre
+          # Büyük (açık) bildirim görünümü: üstte kalan süre, altında 6 vakit (2 satır x 3 sütun)
           cat > res/layout/nb.xml <<'EOF'
           <?xml version="1.0" encoding="utf-8"?>
           <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
@@ -101,35 +101,37 @@ jobs:
             <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
                 android:orientation="horizontal" android:gravity="center_vertical">
               <TextView android:id="@+id/ta" android:layout_width="0dp" android:layout_height="wrap_content"
-                  android:layout_weight="1" android:textColor="#FF9800" android:textSize="12sp" android:textStyle="bold" android:singleLine="true"/>
+                  android:layout_weight="1" android:textColor="#FF9800" android:textSize="12dp" android:textStyle="bold"
+                  android:singleLine="true" android:ellipsize="end"/>
               <Chronometer android:id="@+id/c1" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                  android:textColor="#FFFFFF" android:textSize="22sp" android:textStyle="bold"/>
+                  android:textColor="#FFFFFF" android:textSize="24dp" android:textStyle="bold"/>
             </LinearLayout>
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="horizontal" android:layout_marginTop="8dp" android:layout_marginBottom="8dp">
           EOF
-          for i in 0 1 2 3 4 5; do
+          for r in 0 1; do
+          cat >> res/layout/nb.xml <<EOF
+            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+                android:orientation="horizontal" android:layout_marginTop="10dp">
+          EOF
+          for c in 0 1 2; do
+          i=$((r*3+c))
           cat >> res/layout/nb.xml <<EOF
               <LinearLayout android:layout_width="0dp" android:layout_height="wrap_content"
                   android:layout_weight="1" android:orientation="vertical" android:gravity="center_horizontal">
                 <TextView android:id="@+id/n$i" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:textColor="#FFFFFF" android:textSize="12sp" android:singleLine="true"/>
+                    android:textColor="#FFFFFF" android:textSize="12dp" android:singleLine="true"/>
                 <TextView android:id="@+id/v$i" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                    android:textColor="#FFFFFF" android:textSize="15sp" android:textStyle="bold" android:singleLine="true"/>
+                    android:textColor="#FFFFFF" android:textSize="20dp" android:textStyle="bold" android:singleLine="true"/>
               </LinearLayout>
           EOF
           done
           cat >> res/layout/nb.xml <<'EOF'
             </LinearLayout>
-            <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
-                android:orientation="horizontal" android:gravity="center_vertical">
-              <TextView android:id="@+id/tb" android:layout_width="0dp" android:layout_height="wrap_content"
-                  android:layout_weight="1" android:textColor="#8A8A8A" android:textSize="12sp" android:singleLine="true"/>
-              <Chronometer android:id="@+id/c2" android:layout_width="wrap_content" android:layout_height="wrap_content"
-                  android:textColor="#FFFFFF" android:textSize="22sp" android:textStyle="bold"/>
-            </LinearLayout>
+          EOF
+          done
+          cat >> res/layout/nb.xml <<'EOF'
           </LinearLayout>
           EOF
+
 
           cat > src/com/veysel/namaz/Rcv.java <<'EOF'
           package com.veysel.namaz;
@@ -169,7 +171,7 @@ jobs:
           import java.util.TimeZone;
 
           public class Core {
-            static final String CH = "vakit", TICK = "com.veysel.namaz.TICK";
+            static final String CH = "vakit2", TICK = "com.veysel.namaz.TICK";
             static final String[] N = {"İmsak", "Güneş", "Öğle", "İkindi", "Akşam", "Yatsı"};
             static final String[] U = {"İMSAK", "GÜNEŞ", "ÖĞLE", "İKİNDİ", "AKŞAM", "YATSI"};
             static final String[] L = {"İMSAK EZANINA KALAN", "GÜNEŞ DOĞUŞUNA KALAN", "ÖĞLE EZANINA KALAN",
@@ -218,6 +220,15 @@ jobs:
             }
 
             static void update(Context c) {
+              try {
+                doUpdate(c);
+                c.getSharedPreferences("p", 0).edit().remove("err").apply();
+              } catch (Throwable e) {
+                c.getSharedPreferences("p", 0).edit().putString("err", String.valueOf(e)).apply();
+              }
+            }
+
+            static void doUpdate(Context c) {
               NotificationManager nm = (NotificationManager) c.getSystemService(Context.NOTIFICATION_SERVICE);
               AlarmManager am = (AlarmManager) c.getSystemService(Context.ALARM_SERVICE);
               PendingIntent alarm = tick(c, 1);
@@ -236,8 +247,12 @@ jobs:
               long t = ms(row[0], tm);
               long base = SystemClock.elapsedRealtime() + (t - now);
 
-              NotificationChannel ch = new NotificationChannel(CH, "Namaz vakitleri", NotificationManager.IMPORTANCE_LOW);
+              nm.deleteNotificationChannel("vakit");
+              NotificationChannel ch = new NotificationChannel(CH, "Namaz vakitleri", NotificationManager.IMPORTANCE_DEFAULT);
               ch.setShowBadge(false);
+              ch.setSound(null, null);
+              ch.enableVibration(false);
+              ch.enableLights(false);
               ch.setLockscreenVisibility(Notification.VISIBILITY_PUBLIC);
               nm.createNotificationChannel(ch);
 
@@ -251,11 +266,8 @@ jobs:
               int[] VI = {R.id.v0, R.id.v1, R.id.v2, R.id.v3, R.id.v4, R.id.v5};
               RemoteViews big = new RemoteViews(c.getPackageName(), R.layout.nb);
               big.setTextViewText(R.id.ta, L[j]);
-              big.setTextViewText(R.id.tb, N[j] + "  " + tm);
               big.setChronometerCountDown(R.id.c1, true);
               big.setChronometer(R.id.c1, base, null, true);
-              big.setChronometerCountDown(R.id.c2, true);
-              big.setChronometer(R.id.c2, base, null, true);
               for (int i = 0; i < 6; i++) {
                 boolean past = ms(row[0], row[i + 1]) <= now;
                 int col = i == j ? OR : (past ? DIM : WH);
@@ -263,7 +275,7 @@ jobs:
                 big.setTextViewText(VI[i], row[i + 1]);
                 big.setTextColor(NI[i], col);
                 big.setTextColor(VI[i], col);
-                if (i == j) big.setTextViewTextSize(VI[i], TypedValue.COMPLEX_UNIT_SP, 18);
+                if (i == j) big.setTextViewTextSize(VI[i], TypedValue.COMPLEX_UNIT_DIP, 24);
               }
 
               PendingIntent open = PendingIntent.getActivity(c, 3, new Intent(c, MainActivity.class),
@@ -297,7 +309,10 @@ jobs:
           package com.veysel.namaz;
 
           import android.app.Activity;
+          import android.app.NotificationManager;
+          import android.content.Intent;
           import android.content.SharedPreferences;
+          import android.provider.Settings;
           import android.content.pm.PackageManager;
           import android.graphics.Typeface;
           import android.os.Build;
@@ -390,6 +405,19 @@ jobs:
               bt.setOnClickListener(v -> fetchAll());
               r.addView(bt);
 
+              Button sb = new Button(this);
+              sb.setText("Bildirim / kilit ekranı ayarları");
+              sb.setOnClickListener(v -> {
+                try {
+                  startActivity(new Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+                      .putExtra(Settings.EXTRA_APP_PACKAGE, getPackageName()));
+                } catch (Exception e) {
+                  startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                      android.net.Uri.parse("package:" + getPackageName())));
+                }
+              });
+              r.addView(sb);
+
               st = tv("", 14, 0xFF8A8A8A, false);
               st.setPadding(0, dp(12), 0, 0);
               r.addView(st);
@@ -411,8 +439,8 @@ jobs:
 
             @Override protected void onResume() {
               super.onResume();
-              refresh();
               Core.update(this);
+              refresh();
             }
 
             @Override public void onRequestPermissionsResult(int code, String[] p, int[] g) {
@@ -424,8 +452,13 @@ jobs:
 
             void refresh() {
               List<String[]> rows = Core.load(this);
+              String diag = "";
+              if (!((NotificationManager) getSystemService(NOTIFICATION_SERVICE)).areNotificationsEnabled())
+                diag += "\nBildirimler KAPALI. Aşağıdaki ayar butonundan aç.";
+              String er0 = pr.getString("err", null);
+              if (er0 != null) diag += "\nBildirim hatası: " + er0;
               if (rows.isEmpty()) {
-                st.setText("Henüz veri yok. Şehir seç ve veriyi çek.");
+                st.setText("Henüz veri yok. Şehir seç ve veriyi çek." + diag);
                 td.setText("");
                 return;
               }
@@ -433,7 +466,7 @@ jobs:
                   + fmt(rows.get(rows.size() - 1)[0]) + " (" + rows.size() + " gün)";
               if (Core.next(rows, System.currentTimeMillis()) == null)
                 msg += "\nVeri bitti, bildirim kapalı. Tekrar veri çek.";
-              st.setText(msg);
+              st.setText(msg + diag);
               String today = Core.key();
               StringBuilder sb = new StringBuilder();
               for (String[] w : rows)
